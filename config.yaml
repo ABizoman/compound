@@ -1,0 +1,39 @@
+# Trading Bot Configuration
+
+# LLM Configuration
+llm:
+  provider: "openrouter"  # Options: openrouter, openai, etc.
+  model: "anthropic/claude-3.5-sonnet"  # Model name for OpenRouter
+  api_base: "https://openrouter.ai/api/v1"  # API base URL
+  # API key should be in .env file as OPENROUTER_API_KEY
+
+# Trading Parameters
+trading:
+  initial_capital: 5000.0  # Starting capital in USD
+  max_steps_per_day: 10  # Maximum LLM tool-call iterations per day
+  symbols:  # List of symbols to trade (default: NASDAQ 100)
+    - "NVDA"
+    - "MSFT"
+    - "AAPL"
+    - "GOOG"
+    - "GOOGL"
+    - "AMZN"
+    - "META"
+    - "AVGO"
+    - "TSLA"
+    - "NFLX"
+
+# MCP Service URLs (for local testing, these will be localhost)
+mcp_services:
+  math: "http://localhost:8001"
+  search: "http://localhost:8002"
+  trade: "http://localhost:8003"
+  stock_local: "http://localhost:8004"
+
+# Data Storage
+data:
+  base_dir: "./data"
+  positions_file: "positions.json"
+  logs_file: "logs.json"
+  daily_results_file: "daily_results.json"
+

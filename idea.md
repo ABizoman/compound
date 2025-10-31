@@ -9,7 +9,7 @@ MCP services to use
         - Jina AI for news and market info, I think they have an MCP as well
 
 	•	trade: applies the decision or records the trade/simulation 
-	•	stock_local (price): returns market/price data for the traded symbols 
+	•	stock_local (price): MCP service backed by Finnhub (free tier) that returns latest price or daily OHLC for the requested symbols. Falls back to cached data to reduce external calls.
 
 Daily run flow
 	1.	Load config (model, API base, API key, max steps, symbols, MCP URLs).
