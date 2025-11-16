@@ -4,6 +4,17 @@ import requests
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file from project root
+_project_root = Path(__file__).parent.parent.parent
+_env_path = _project_root / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+else:
+    # Fallback to default behavior (searches current directory and parents)
+    load_dotenv()
 
 
 app = FastAPI(title="Search MCP Server")
@@ -56,7 +67,8 @@ def get_alpha_vantage_news(symbol: str) -> Dict[str, Any]:
     """Fetch news from Alpha Vantage API."""
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
     if not api_key:
-        return {"error": "ALPHA_VANTAGE_API_KEY not set"}
+        print("Warning: ALPHA_VANTAGE_API_KEY not found in environment")
+        return {"error": "ALPHA_VANTAGE_API_KEY not set. Add it to your .env file."}
     
     try:
         url = "https://www.alphavantage.co/query"
@@ -68,8 +80,30 @@ def get_alpha_vantage_news(symbol: str) -> Dict[str, Any]:
         }
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        
+        # Check for API errors in response
+        if "Error Message" in data:
+            print(f"Alpha Vantage API error: {data.get('Error Message')}")
+            return {"error": data.get("Error Message")}
+        if "Note" in data:
+            print(f"Alpha Vantage API note: {data.get('Note')}")
+            return {"error": data.get("Note")}
+        
+        return data
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP error fetching Alpha Vantage news for {symbol}: {e}")
+        if e.response is not None:
+            try:
+                error_data = e.response.json()
+                print(f"Error response: {error_data}")
+            except:
+                print(f"Error response text: {e.response.text}")
+        return {"error": f"HTTP error: {str(e)}"}
     except Exception as e:
+        print(f"Error fetching Alpha Vantage news for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
 
@@ -82,7 +116,8 @@ def get_jina_search(query: str) -> Dict[str, Any]:
     """
     api_key = os.getenv("JINA_API_KEY")
     if not api_key:
-        return {"error": "JINA_API_KEY not set"}
+        print("Warning: JINA_API_KEY not found in environment")
+        return {"error": "JINA_API_KEY not set. Add it to your .env file."}
     
     try:
         # Jina AI Embedding API - can be used for semantic search
@@ -108,9 +143,19 @@ def get_jina_search(query: str) -> Dict[str, Any]:
             "note": "Jina AI embedding API used. For full search functionality, consider using Jina AI MCP server or vector database."
         }
     except requests.exceptions.HTTPError as e:
+        print(f"HTTP error fetching Jina AI search for '{query}': {e}")
+        if e.response is not None:
+            try:
+                error_data = e.response.json()
+                print(f"Error response: {error_data}")
+            except:
+                print(f"Error response text: {e.response.text}")
         # If API endpoint doesn't work, return helpful error
-        return {"error": f"Jina AI API error: {e.response.status_code}. Check API endpoint or use Jina AI MCP server instead."}
+        return {"error": f"Jina AI API error: {e.response.status_code if e.response else 'unknown'}. Check API endpoint or use Jina AI MCP server instead."}
     except Exception as e:
+        print(f"Error fetching Jina AI search for '{query}': {e}")
+        import traceback
+        traceback.print_exc()
         return {"error": f"Jina AI search error: {str(e)}"}
 
 

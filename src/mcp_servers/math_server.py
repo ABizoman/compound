@@ -3,6 +3,17 @@ import math
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file from project root
+_project_root = Path(__file__).parent.parent.parent
+_env_path = _project_root / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+else:
+    # Fallback to default behavior (searches current directory and parents)
+    load_dotenv()
 
 
 app = FastAPI(title="Math MCP Server")

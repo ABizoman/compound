@@ -22,16 +22,39 @@ def main():
     ]
     
     processes = []
+    _shutting_down = False
     
     def signal_handler(sig, frame):
         """Handle Ctrl+C gracefully."""
+        nonlocal _shutting_down
+        if _shutting_down:
+            # Force kill if already shutting down
+            print("\nForce killing servers...")
+            for process, script, port, name in processes:
+                try:
+                    process.kill()
+                except:
+                    pass
+            sys.exit(1)
+        
+        _shutting_down = True
         print("\n\nStopping all servers...")
         for process, script, port, name in processes:
             print(f"  Stopping {name} server (port {port})...")
-            process.terminate()
-        # Wait for all to terminate
+            try:
+                process.terminate()
+            except:
+                pass
+        
+        # Wait for all to terminate (with timeout)
         for process, script, port, name in processes:
-            process.wait()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                print(f"  Force killing {name} server...")
+                process.kill()
+                process.wait()
+        
         print("✓ All servers stopped")
         sys.exit(0)
     

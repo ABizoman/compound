@@ -6,6 +6,16 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file from project root
+_project_root = Path(__file__).parent.parent.parent
+_env_path = _project_root / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+else:
+    # Fallback to default behavior (searches current directory and parents)
+    load_dotenv()
 
 
 app = FastAPI(title="Stock Local MCP Server")
@@ -18,7 +28,7 @@ class ToolCallRequest(BaseModel):
 
 # Cache for price data
 _price_cache = {}
-_cache_file = Path("./data/price_cache.json")
+_cache_file = _project_root / "data" / "price_cache.json"
 
 
 def load_cache():
@@ -43,6 +53,7 @@ def get_finnhub_quote(symbol: str) -> Optional[Dict[str, Any]]:
     """Get current quote from Finnhub."""
     api_key = os.getenv("FINNHUB_API_KEY")
     if not api_key:
+        print(f"Warning: FINNHUB_API_KEY not found in environment")
         return None
     
     try:
@@ -52,7 +63,12 @@ def get_finnhub_quote(symbol: str) -> Optional[Dict[str, Any]]:
         response.raise_for_status()
         data = response.json()
         
-        if "c" in data:  # 'c' is current price
+        # Check for API errors
+        if "error" in data:
+            print(f"Finnhub API error: {data.get('error')}")
+            return None
+        
+        if "c" in data and data["c"] is not None:  # 'c' is current price
             return {
                 "symbol": symbol,
                 "current": data.get("c"),
@@ -62,9 +78,22 @@ def get_finnhub_quote(symbol: str) -> Optional[Dict[str, Any]]:
                 "previous_close": data.get("pc"),
                 "timestamp": datetime.now().isoformat()
             }
+        else:
+            print(f"No price data in response for {symbol}: {data}")
+            return None
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP error fetching Finnhub quote for {symbol}: {e}")
+        if e.response is not None:
+            try:
+                error_data = e.response.json()
+                print(f"Error response: {error_data}")
+            except:
+                print(f"Error response text: {e.response.text}")
         return None
     except Exception as e:
-        print(f"Error fetching Finnhub quote: {e}")
+        print(f"Error fetching Finnhub quote for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -72,6 +101,7 @@ def get_finnhub_candle(symbol: str, resolution: str = "D", count: int = 1) -> Op
     """Get historical candle data from Finnhub."""
     api_key = os.getenv("FINNHUB_API_KEY")
     if not api_key:
+        print(f"Warning: FINNHUB_API_KEY not found in environment")
         return None
     
     try:
@@ -90,6 +120,11 @@ def get_finnhub_candle(symbol: str, resolution: str = "D", count: int = 1) -> Op
         response.raise_for_status()
         data = response.json()
         
+        # Check for API errors
+        if "error" in data:
+            print(f"Finnhub API error: {data.get('error')}")
+            return None
+        
         if data.get("s") == "ok" and data.get("c"):
             candles = []
             for i in range(len(data["c"])):
@@ -102,9 +137,25 @@ def get_finnhub_candle(symbol: str, resolution: str = "D", count: int = 1) -> Op
                     "volume": data.get("v", [])[i] if "v" in data else None
                 })
             return candles[-count:]  # Return last N candles
+        else:
+            print(f"No candle data in response for {symbol}: status={data.get('s')}, data={data}")
+            return None
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP error fetching Finnhub candle for {symbol}: {e}")
+        if e.response is not None:
+            try:
+                error_data = e.response.json()
+                print(f"Error response: {error_data}")
+                # Check for 403 (forbidden) - free tier doesn't have candle access
+                if e.response.status_code == 403:
+                    print(f"Note: Finnhub free tier does not include candle data. Upgrade required.")
+            except:
+                print(f"Error response text: {e.response.text}")
         return None
     except Exception as e:
-        print(f"Error fetching Finnhub candle: {e}")
+        print(f"Error fetching Finnhub candle for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -250,9 +301,16 @@ async def call_tool(request: ToolCallRequest):
                     ]
                 }
             else:
+                # Provide helpful error message
+                error_msg = (
+                    f"Error: Could not fetch OHLC data for {symbol}. "
+                    "The Finnhub free tier does not include access to historical candle data. "
+                    "This endpoint requires a paid Finnhub plan. "
+                    "You can use 'get_current_price' for current quotes."
+                )
                 return {
                     "content": [
-                        {"type": "text", "text": f"Error: Could not fetch OHLC data for {symbol}"}
+                        {"type": "text", "text": error_msg}
                     ]
                 }
         

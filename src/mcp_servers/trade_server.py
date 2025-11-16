@@ -1,9 +1,20 @@
 import json
+import os
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load .env file from project root
+_project_root = Path(__file__).parent.parent.parent
+_env_path = _project_root / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+else:
+    # Fallback to default behavior (searches current directory and parents)
+    load_dotenv()
 
 
 app = FastAPI(title="Trade MCP Server")
@@ -94,10 +105,15 @@ _portfolio_state = {
 }
 
 
-def load_portfolio_state(data_dir: str = "./data", initial_capital: float = 5000.0):
+def load_portfolio_state(data_dir: str = None, initial_capital: float = 5000.0):
     """Load portfolio state from file."""
     global _portfolio_state
-    state_file = Path(data_dir) / "portfolio_state.json"
+    # Use project root data directory if not specified
+    if data_dir is None:
+        data_dir_path = _project_root / "data"
+    else:
+        data_dir_path = Path(data_dir)
+    state_file = data_dir_path / "portfolio_state.json"
     if state_file.exists():
         try:
             with open(state_file, 'r') as f:
@@ -119,9 +135,14 @@ def load_portfolio_state(data_dir: str = "./data", initial_capital: float = 5000
         }
 
 
-def save_portfolio_state(data_dir: str = "./data"):
+def save_portfolio_state(data_dir: str = None):
     """Save portfolio state to file."""
-    state_file = Path(data_dir) / "portfolio_state.json"
+    # Use project root data directory if not specified
+    if data_dir is None:
+        data_dir_path = _project_root / "data"
+    else:
+        data_dir_path = Path(data_dir)
+    state_file = data_dir_path / "portfolio_state.json"
     state_file.parent.mkdir(parents=True, exist_ok=True)
     with open(state_file, 'w') as f:
         json.dump(_portfolio_state, f, indent=2)
@@ -131,7 +152,6 @@ def save_portfolio_state(data_dir: str = "./data"):
 async def startup_event():
     """Initialize portfolio state on startup."""
     # Try to get initial capital from environment or use default
-    import os
     initial_capital = float(os.getenv("INITIAL_CAPITAL", "5000.0"))
     # Load portfolio state (will initialize if file doesn't exist)
     load_portfolio_state(initial_capital=initial_capital)

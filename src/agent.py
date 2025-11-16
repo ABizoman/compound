@@ -164,9 +164,23 @@ When you think your task is complete, output:
                 if message.tool_calls:
                     for tool_call in message.tool_calls:
                         tool_name = tool_call.function.name
-                        tool_args = json.loads(tool_call.function.arguments)
                         
-                        print(f"🔧 Calling tool: {tool_name}({tool_args})")
+                        # Handle arguments - might be None, string, or dict
+                        arguments_raw = tool_call.function.arguments
+                        if arguments_raw is None:
+                            tool_args = {}
+                        elif isinstance(arguments_raw, str):
+                            try:
+                                tool_args = json.loads(arguments_raw)
+                            except json.JSONDecodeError as e:
+                                print(f"⚠ Warning: Failed to parse tool arguments: {e}")
+                                tool_args = {}
+                        elif isinstance(arguments_raw, dict):
+                            tool_args = arguments_raw
+                        else:
+                            tool_args = {}
+                        
+                        print(f"Calling tool: {tool_name}({tool_args})")
                         
                         # Find which MCP client has this tool
                         tool_result = None

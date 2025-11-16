@@ -62,11 +62,31 @@ class MCPClient:
                 timeout=30
             )
             response.raise_for_status()
-            return response.json()
-        except Exception as e:
+            
+            # Handle empty or None response
+            try:
+                result = response.json()
+                if result is None:
+                    return {
+                        "error": "Empty response from server",
+                        "content": [{"type": "text", "text": f"Empty response from {tool_name}"}]
+                    }
+                return result
+            except (json.JSONDecodeError, ValueError) as e:
+                # Response is not valid JSON
+                return {
+                    "error": f"Invalid JSON response: {str(e)}",
+                    "content": [{"type": "text", "text": f"Error: Invalid response from {tool_name}: {response.text[:200]}"}]
+                }
+        except requests.exceptions.RequestException as e:
             return {
                 "error": str(e),
                 "content": [{"type": "text", "text": f"Error calling tool {tool_name}: {e}"}]
+            }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "content": [{"type": "text", "text": f"Unexpected error calling tool {tool_name}: {e}"}]
             }
     
     def get_tools_for_llm(self) -> List[Dict[str, Any]]:

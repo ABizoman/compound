@@ -4,14 +4,34 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env file from project root
+_project_root = Path(__file__).parent.parent
+_env_path = _project_root / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+else:
+    # Fallback to default behavior (searches current directory and parents)
+    load_dotenv()
 
 
 class Config:
     """Configuration manager for the trading bot."""
     
     def __init__(self, config_path: str = "config.yaml"):
-        self.config_path = Path(config_path)
+        # Resolve config path relative to project root (parent of src/)
+        if Path(config_path).is_absolute():
+            self.config_path = Path(config_path)
+        else:
+            # Try to find config.yaml relative to project root
+            # If running from src/, go up one level; if from root, use as-is
+            project_root = Path(__file__).parent.parent
+            self.config_path = project_root / config_path
+            # If not found there, try current working directory as fallback
+            if not self.config_path.exists():
+                cwd_path = Path(config_path)
+                if cwd_path.exists():
+                    self.config_path = cwd_path
+        
         self.config = self._load_config()
     
     def _load_config(self) -> Dict[str, Any]:
