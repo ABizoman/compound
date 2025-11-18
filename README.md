@@ -45,7 +45,6 @@ cp .env.example .env
 Edit `.env` and add your API keys:
 - `OPENROUTER_API_KEY` - Required for LLM access
 - `ALPHA_VANTAGE_API_KEY` - Optional, for market news (free tier: 25 requests/day)
-- `JINA_API_KEY` - Optional, for market information search
 - `FINNHUB_API_KEY` - Required for stock price data (free tier available)
 
 ### 3. Configure Trading Parameters
@@ -130,7 +129,7 @@ All data is stored in the `./data/` directory:
 - `calculate_percentage` - Calculate percentage changes
 
 ### Search Server (Port 8002)
-- `search_market_news` - Search for market news using Jina AI and Alpha Vantage
+- `search_market_news` - Search for market news using Alpha Vantage
 - `get_market_insights` - Get market insights for a specific symbol
 
 ### Trade Server (Port 8003)

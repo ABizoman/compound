@@ -29,7 +29,7 @@ class ToolCallRequest(BaseModel):
 SEARCH_TOOLS = [
     {
         "name": "search_market_news",
-        "description": "Search for market news and information about stocks. Uses Alpha Vantage and Jina AI to fetch relevant market information.",
+        "description": "Search for market news and information about stocks. Uses Alpha Vantage to fetch relevant market information.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -107,58 +107,6 @@ def get_alpha_vantage_news(symbol: str) -> Dict[str, Any]:
         return {"error": str(e)}
 
 
-def get_jina_search(query: str) -> Dict[str, Any]:
-    """Search using Jina AI.
-    
-    Note: Jina AI primarily offers embedding and reranking APIs. For market search,
-    you may want to use Jina's embedding API with a vector database, or use a
-    Jina AI MCP server if available. This is a placeholder implementation.
-    """
-    api_key = os.getenv("JINA_API_KEY")
-    if not api_key:
-        print("Warning: JINA_API_KEY not found in environment")
-        return {"error": "JINA_API_KEY not set. Add it to your .env file."}
-    
-    try:
-        # Jina AI Embedding API - can be used for semantic search
-        # This is a basic implementation - you may want to enhance it with
-        # actual vector search or use a Jina AI MCP server for market info
-        url = "https://api.jina.ai/v1/embeddings"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "input": query,
-            "model": "jina-embeddings-v2-base-en"
-        }
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        response.raise_for_status()
-        result = response.json()
-        # Return a simplified result indicating embedding was generated
-        # For actual search, you'd need to compare with stored embeddings
-        return {
-            "query": query,
-            "embedding_generated": True,
-            "note": "Jina AI embedding API used. For full search functionality, consider using Jina AI MCP server or vector database."
-        }
-    except requests.exceptions.HTTPError as e:
-        print(f"HTTP error fetching Jina AI search for '{query}': {e}")
-        if e.response is not None:
-            try:
-                error_data = e.response.json()
-                print(f"Error response: {error_data}")
-            except:
-                print(f"Error response text: {e.response.text}")
-        # If API endpoint doesn't work, return helpful error
-        return {"error": f"Jina AI API error: {e.response.status_code if e.response else 'unknown'}. Check API endpoint or use Jina AI MCP server instead."}
-    except Exception as e:
-        print(f"Error fetching Jina AI search for '{query}': {e}")
-        import traceback
-        traceback.print_exc()
-        return {"error": f"Jina AI search error: {str(e)}"}
-
-
 @app.post("/mcp/tools/list")
 async def list_tools():
     """List available tools."""
@@ -174,11 +122,6 @@ async def call_tool(request: ToolCallRequest):
             symbols = request.arguments.get("symbols", [])
             
             results = []
-            
-            # Try Jina AI search
-            jina_result = get_jina_search(query)
-            if "error" not in jina_result:
-                results.append(f"Jina AI Results: {json.dumps(jina_result, indent=2)}")
             
             # Try Alpha Vantage for each symbol
             for symbol in symbols[:3]:  # Limit to 3 symbols to avoid rate limits
