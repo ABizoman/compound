@@ -23,7 +23,8 @@ sys.path.insert(0, str(project_root))
 from src.config import Config
 from src.agent import TradingAgent
 from src.mcp_servers.math_server import MATH_TOOLS
-from src.mcp_servers.search_server import SEARCH_TOOLS, get_alpha_vantage_news
+from src.mcp_servers.search_server import SEARCH_TOOLS
+from src.mcp_servers.finnhub_client import get_finnhub_news
 import math
 
 
@@ -406,6 +407,150 @@ class BacktestAgent:
                 tool_copy["inputSchema"] = schema
             
             tools.append(convert_to_openai(tool_copy))
+        
+        # Add Stock tools
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "get_current_price",
+                "description": "Get the current price of a stock symbol",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "The stock ticker symbol (e.g., AAPL, GOOGL)"
+                        }
+                    },
+                    "required": ["symbol"]
+                }
+            }
+        })
+        
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "get_prices_batch",
+                "description": "Get current prices for multiple stock symbols at once",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbols": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of stock ticker symbols"
+                        }
+                    },
+                    "required": ["symbols"]
+                }
+            }
+        })
+        
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "get_daily_ohlc",
+                "description": "Get daily OHLC (Open, High, Low, Close) data for a stock",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "The stock ticker symbol"
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days of data to retrieve",
+                            "default": 1
+                        }
+                    },
+                    "required": ["symbol"]
+                }
+            }
+        })
+        
+        # Add Trade tools - price is REQUIRED
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "buy_stock",
+                "description": "Buy shares of a stock. You MUST provide the current price - get it first using get_current_price or get_prices_batch.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "The stock ticker symbol to buy"
+                        },
+                        "quantity": {
+                            "type": "number",
+                            "description": "Number of shares to buy"
+                        },
+                        "price": {
+                            "type": "number",
+                            "description": "The current price per share (REQUIRED - get this from get_current_price first)"
+                        }
+                    },
+                    "required": ["symbol", "quantity", "price"]
+                }
+            }
+        })
+        
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "sell_stock",
+                "description": "Sell shares of a stock. You MUST provide the current price - get it first using get_current_price or get_prices_batch.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "The stock ticker symbol to sell"
+                        },
+                        "quantity": {
+                            "type": "number",
+                            "description": "Number of shares to sell"
+                        },
+                        "price": {
+                            "type": "number",
+                            "description": "The current price per share (REQUIRED - get this from get_current_price first)"
+                        }
+                    },
+                    "required": ["symbol", "quantity", "price"]
+                }
+            }
+        })
+        
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "get_portfolio",
+                "description": "Get the current portfolio state including cash and all positions",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
+        
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "get_position",
+                "description": "Get the current position for a specific stock symbol",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "The stock ticker symbol"
+                        }
+                    },
+                    "required": ["symbol"]
+                }
+            }
+        })
             
         return tools
     
@@ -461,13 +606,11 @@ class BacktestAgent:
                 
         # Search tools
         elif tool_name == "get_market_insights":
-            # Inject current date as time_to and 7 days prior as time_from
-            current_date_obj = datetime.strptime(stock_server.current_date, "%Y-%m-%d")
-            time_to = current_date_obj.strftime("%Y%m%dT2359")
-            time_from = (current_date_obj - timedelta(days=7)).strftime("%Y%m%dT0000")
-            
             symbol = args.get("symbol", "")
-            result = get_alpha_vantage_news(symbol, time_from=time_from, time_to=time_to)
+            category = args.get("category", "general")
+            min_id = args.get("min_id", 0)
+            
+            result = get_finnhub_news(symbol=symbol, category=category, min_id=min_id)
             
             if "error" in result:
                 return {"content": [{"type": "text", "text": f"Error: {result['error']}"}]}
@@ -477,8 +620,8 @@ class BacktestAgent:
         else:
             return {"content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}]}
     
-    def get_system_prompt(self, today_date: str) -> str:
-        """Generate system prompt."""
+    def get_system_prompt(self, today_date: str, max_steps: int) -> str:
+        """Generate system prompt with step count awareness."""
         return f"""You are a stock fundamental analysis trading assistant.
 
 Your goals are:
@@ -487,17 +630,28 @@ Your goals are:
 - Your long-term goal is to maximize returns through this portfolio.
 - Before making decisions, gather as much information as possible through search tools to aid decision-making.
 
+STEP BUDGET: You have a MAXIMUM of {max_steps} steps to complete your analysis and trading today.
+You MUST be efficient and prioritize the most important actions.
+
+CRITICAL TRADING RULES:
+- When buying or selling stocks, you MUST provide the price parameter as a NUMBER (not a string)
+- ALWAYS get prices FIRST using get_prices_batch or get_current_price BEFORE executing trades
+- Example workflow:
+  1. Call get_prices_batch with symbols ["AAPL", "GOOGL", ...]
+  2. Note the prices returned (e.g., AAPL: 150.25)
+  3. Call buy_stock with symbol="AAPL", quantity=10, price=150.25 (use the actual number)
+
 CRITICAL: You MUST complete ALL of the following steps before finishing. DO NOT skip any steps:
 
 STEP 1: Gather market insights using get_market_insights for all available symbols
-STEP 2: Get current prices using get_current_price or get_prices_batch for ALL symbols
+STEP 2: Get current prices using get_prices_batch for ALL symbols (REQUIRED before any trades)
 STEP 3: Analyze your current portfolio using get_portfolio
 STEP 4: Calculate valuations and potential returns
 STEP 5: Make a trading decision:
-   - If you have cash and see opportunities: BUY stocks
-   - If prices have moved: consider SELLING or REBALANCING
+   - If you have cash and see opportunities: BUY stocks (include price parameter!)
+   - If prices have moved: consider SELLING or REBALANCING (include price parameter!)
    - If no clear opportunity: explicitly state you're HOLDING
-STEP 6: Execute any trades using buy_stock or sell_stock
+STEP 6: Execute any trades using buy_stock or sell_stock WITH THE PRICE PARAMETER
 STEP 7: ONLY after completing steps 1-6, output {self.STOP_SIGNAL}
 
 IMPORTANT RULES:
@@ -506,6 +660,8 @@ IMPORTANT RULES:
 - You must make a conscious trading decision (buy/sell/hold) based on price analysis
 - DO NOT output {self.STOP_SIGNAL} until you have checked prices and made trading decisions
 - Simply gathering news is NOT enough - you must analyze prices and execute trades or explicitly decide to hold
+- Be EFFICIENT with your steps - you only have {max_steps} total!
+- BUY/SELL ORDERS REQUIRE price AS A NUMBER - always include it!
 
 Thinking standards:
 - Show your reasoning clearly:
@@ -513,7 +669,7 @@ Thinking standards:
   - "Checking current prices for portfolio analysis"
   - "Current portfolio has X positions worth $Y"
   - "Based on prices, I will buy/sell/hold because..."
-  - "Executing trade: ..."
+  - "Executing trade: buying X shares of Y at price Z"
 
 Notes:
 - You don't need user permission, execute trades directly
@@ -531,10 +687,11 @@ Current portfolio state:
 Available symbols to trade: {', '.join(self.trading_config.get('symbols', []))}
 
 Remember: You MUST check prices and make trading decisions. Output {self.STOP_SIGNAL} ONLY after completing all analysis and trades.
+REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
 """
     
     def run_day(self, date: str) -> Dict[str, Any]:
-        """Run the agent for one trading day."""
+        """Run the agent for one trading day with step count awareness."""
         print(f"\n{'='*60}")
         print(f"Backtest: Running agent for {date}")
         print(f"{'='*60}")
@@ -544,12 +701,11 @@ Remember: You MUST check prices and make trading decisions. Output {self.STOP_SI
         trade_server = BacktestTradeServer(self.portfolio, date)
         
         # Initialize conversation
-        messages = [
-            {"role": "system", "content": self.get_system_prompt(date)},
-            {"role": "user", "content": f"Today is {date}. Analyze prices and make trading decisions."}
-        ]
-        
         max_steps = self.trading_config.get("max_steps_per_day", 15)
+        messages = [
+            {"role": "system", "content": self.get_system_prompt(date, max_steps)},
+            {"role": "user", "content": f"Today is {date}. You have {max_steps} steps maximum. Analyze prices and make trading decisions efficiently."}
+        ]
         step_count = 0
         logs = []
         
@@ -605,10 +761,33 @@ Remember: You MUST check prices and make trading decisions. Output {self.STOP_SI
                         
                         result_text = tool_result.get("content", [{}])[0].get("text", "")
                         print(f"      → {result_text[:80]}...")
+                    
+                    # Inject step count reminder after tool calls
+                    steps_remaining = max_steps - step_count
+                    if steps_remaining <= 5:
+                        urgency_msg = f"URGENT: Only {steps_remaining} steps remaining! You MUST complete your analysis and trades NOW or you will run out of steps."
+                    elif steps_remaining <= 10:
+                        urgency_msg = f"Warning: {steps_remaining} steps remaining. Please work efficiently to complete all required steps."
+                    else:
+                        urgency_msg = f"Steps remaining: {steps_remaining}/{max_steps}"
+                    
+                    messages.append({
+                        "role": "user",
+                        "content": urgency_msg
+                    })
                 else:
                     if message.content:
-                        print(f"  💬 {message.content[:100]}...")
+                        print(f"💬 {message.content[:100]}...")
                         logs.append({"step": step_count, "type": "message", "content": message.content})
+                    
+                    # Also inject step reminder for non-tool responses
+                    steps_remaining = max_steps - step_count
+                    if steps_remaining > 0:
+                        if steps_remaining <= 5:
+                            urgency_msg = f"URGENT: Only {steps_remaining} steps remaining! Complete your work NOW."
+                        else:
+                            urgency_msg = f"Steps remaining: {steps_remaining}/{max_steps}"
+                        messages.append({"role": "user", "content": urgency_msg})
                 
             except Exception as e:
                 print(f"  ✗ Error: {e}")

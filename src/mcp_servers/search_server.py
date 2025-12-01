@@ -6,6 +6,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
 from dotenv import load_dotenv
+# Import Finnhub client
+from src.mcp_servers.finnhub_client import get_finnhub_news
 
 # Load .env file from project root
 _project_root = Path(__file__).parent.parent.parent
@@ -29,97 +31,29 @@ class ToolCallRequest(BaseModel):
 SEARCH_TOOLS = [
     {
         "name": "get_market_insights",
-        "description": "Get market news and insights for a specific stock from Alpha Vantage. Returns a concise list of recent news items.",
+        "description": "Get market news and insights for a specific stock from Finnhub. Returns a concise list of recent news items.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "Stock symbol to get insights for"
+                    "description": "Stock symbol to filter news (optional)"
                 },
-                "time_from": {
+                "category": {
                     "type": "string",
-                    "description": "Start of time range in YYYYMMDDTHHMM format (e.g., 20220410T0130)"
+                    "enum": ["general", "forex", "crypto", "merger"],
+                    "description": "News category"
                 },
-                "time_to": {
-                    "type": "string",
-                    "description": "End of time range in YYYYMMDDTHHMM format (e.g., 20220410T0130)"
+                "min_id": {
+                    "type": "integer",
+                    "description": "Return only news items with ID greater than this value"
                 }
             },
-            "required": ["symbol"]
+            "required": []
         }
     }
 ]
 
-
-def get_alpha_vantage_news(symbol: str, time_from: str = None, time_to: str = None) -> Dict[str, Any]:
-    """Fetch news from Alpha Vantage API.
-    
-    Args:
-        symbol: Stock ticker symbol
-        time_from: Start of time range in YYYYMMDDTHHMM format (e.g., 20220410T0130)
-        time_to: End of time range in YYYYMMDDTHHMM format (e.g., 20220410T0130)
-    """
-    api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
-    if not api_key:
-        print("Warning: ALPHA_VANTAGE_API_KEY not found in environment")
-        return {"error": "ALPHA_VANTAGE_API_KEY not set. Add it to your .env file."}
-    
-    try:
-        url = "https://www.alphavantage.co/query"
-        params = {
-            "function": "NEWS_SENTIMENT",
-            "tickers": symbol,
-            "apikey": api_key,
-            "limit": 5
-        }
-        
-        # Add optional time range parameters
-        if time_from:
-            params["time_from"] = time_from
-        if time_to:
-            params["time_to"] = time_to
-        
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Check for API errors in response
-        if "Error Message" in data:
-            print(f"Alpha Vantage API error: {data.get('Error Message')}")
-            return {"error": data.get("Error Message")}
-        if "Note" in data:
-            print(f"Alpha Vantage API note: {data.get('Note')}")
-            return {"error": data.get("Note")}
-        
-        # Process and simplify results
-        news_items = [
-            {
-                "title": item.get("title"),
-                "summary": item.get("summary"),
-                "url": item.get("url"),
-                "time_published": item.get("time_published"),
-                "sentiment_score": item.get("overall_sentiment_score"),
-                "sentiment_label": item.get("overall_sentiment_label")
-            }
-            for item in data.get("feed", [])[:5]  # Limit to 5 items
-        ]
-        
-        return {"news": news_items}
-    except requests.exceptions.HTTPError as e:
-        print(f"HTTP error fetching Alpha Vantage news for {symbol}: {e}")
-        if e.response is not None:
-            try:
-                error_data = e.response.json()
-                print(f"Error response: {error_data}")
-            except:
-                print(f"Error response text: {e.response.text}")
-        return {"error": f"HTTP error: {str(e)}"}
-    except Exception as e:
-        print(f"Error fetching Alpha Vantage news for {symbol}: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"error": str(e)}
 
 
 @app.post("/mcp/tools/list")
@@ -134,9 +68,9 @@ async def call_tool(request: ToolCallRequest):
     try:
         if request.name == "get_market_insights":
             symbol = request.arguments.get("symbol", "")
-            time_from = request.arguments.get("time_from")
-            time_to = request.arguments.get("time_to")
-            result = get_alpha_vantage_news(symbol, time_from=time_from, time_to=time_to)
+            category = request.arguments.get("category", "general")
+            min_id = request.arguments.get("min_id", 0)
+            result = get_finnhub_news(symbol=symbol, category=category, min_id=min_id)
             
             if "error" in result:
                 return {
