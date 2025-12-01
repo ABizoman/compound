@@ -28,33 +28,22 @@ class ToolCallRequest(BaseModel):
 # Available search tools
 SEARCH_TOOLS = [
     {
-        "name": "search_market_news",
-        "description": "Search for market news and information about stocks. Uses Alpha Vantage to fetch relevant market information.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query for market news and information"
-                },
-                "symbols": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional list of stock symbols to filter news for"
-                }
-            },
-            "required": ["query"]
-        }
-    },
-    {
         "name": "get_market_insights",
-        "description": "Get market insights from Alpha Vantage API",
+        "description": "Get market news and insights for a specific stock from Alpha Vantage. Returns a concise list of recent news items.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "symbol": {
                     "type": "string",
                     "description": "Stock symbol to get insights for"
+                },
+                "time_from": {
+                    "type": "string",
+                    "description": "Start of time range in YYYYMMDDTHHMM format (e.g., 20220410T0130)"
+                },
+                "time_to": {
+                    "type": "string",
+                    "description": "End of time range in YYYYMMDDTHHMM format (e.g., 20220410T0130)"
                 }
             },
             "required": ["symbol"]
@@ -63,8 +52,14 @@ SEARCH_TOOLS = [
 ]
 
 
-def get_alpha_vantage_news(symbol: str) -> Dict[str, Any]:
-    """Fetch news from Alpha Vantage API."""
+def get_alpha_vantage_news(symbol: str, time_from: str = None, time_to: str = None) -> Dict[str, Any]:
+    """Fetch news from Alpha Vantage API.
+    
+    Args:
+        symbol: Stock ticker symbol
+        time_from: Start of time range in YYYYMMDDTHHMM format (e.g., 20220410T0130)
+        time_to: End of time range in YYYYMMDDTHHMM format (e.g., 20220410T0130)
+    """
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
     if not api_key:
         print("Warning: ALPHA_VANTAGE_API_KEY not found in environment")
@@ -78,6 +73,13 @@ def get_alpha_vantage_news(symbol: str) -> Dict[str, Any]:
             "apikey": api_key,
             "limit": 5
         }
+        
+        # Add optional time range parameters
+        if time_from:
+            params["time_from"] = time_from
+        if time_to:
+            params["time_to"] = time_to
+        
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -90,7 +92,20 @@ def get_alpha_vantage_news(symbol: str) -> Dict[str, Any]:
             print(f"Alpha Vantage API note: {data.get('Note')}")
             return {"error": data.get("Note")}
         
-        return data
+        # Process and simplify results
+        news_items = [
+            {
+                "title": item.get("title"),
+                "summary": item.get("summary"),
+                "url": item.get("url"),
+                "time_published": item.get("time_published"),
+                "sentiment_score": item.get("overall_sentiment_score"),
+                "sentiment_label": item.get("overall_sentiment_label")
+            }
+            for item in data.get("feed", [])[:5]  # Limit to 5 items
+        ]
+        
+        return {"news": news_items}
     except requests.exceptions.HTTPError as e:
         print(f"HTTP error fetching Alpha Vantage news for {symbol}: {e}")
         if e.response is not None:
@@ -117,30 +132,11 @@ async def list_tools():
 async def call_tool(request: ToolCallRequest):
     """Call a search tool."""
     try:
-        if request.name == "search_market_news":
-            query = request.arguments.get("query", "")
-            symbols = request.arguments.get("symbols", [])
-            
-            results = []
-            
-            # Try Alpha Vantage for each symbol
-            for symbol in symbols[:3]:  # Limit to 3 symbols to avoid rate limits
-                av_result = get_alpha_vantage_news(symbol)
-                if "error" not in av_result:
-                    results.append(f"Alpha Vantage News for {symbol}: {json.dumps(av_result, indent=2)}")
-            
-            if not results:
-                results.append("No search results available. Check API keys.")
-            
-            return {
-                "content": [
-                    {"type": "text", "text": "\n\n".join(results)}
-                ]
-            }
-        
-        elif request.name == "get_market_insights":
+        if request.name == "get_market_insights":
             symbol = request.arguments.get("symbol", "")
-            result = get_alpha_vantage_news(symbol)
+            time_from = request.arguments.get("time_from")
+            time_to = request.arguments.get("time_to")
+            result = get_alpha_vantage_news(symbol, time_from=time_from, time_to=time_to)
             
             if "error" in result:
                 return {

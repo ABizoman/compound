@@ -3,14 +3,15 @@
 # LLM Configuration
 llm:
   provider: "openrouter"  # Options: openrouter, openai, etc.
-  model: "anthropic/claude-3.5-sonnet"  # Model name for OpenRouter
+  model: "minimax/minimax-m2"  # Better at following instructions than grok
+  # Alternative free models: google/gemini-flash-1.5, microsoft/phi-3-medium-128k-instruct:free
   api_base: "https://openrouter.ai/api/v1"  # API base URL
   # API key should be in .env file as OPENROUTER_API_KEY
 
 # Trading Parameters
 trading:
   initial_capital: 5000.0  # Starting capital in USD
-  max_steps_per_day: 10  # Maximum LLM tool-call iterations per day
+  max_steps_per_day: 15  # Maximum LLM tool-call iterations per day
   symbols:  # List of symbols to trade (default: NASDAQ 100)
     - "NVDA"
     - "MSFT"
