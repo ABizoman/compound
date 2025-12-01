@@ -6,8 +6,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
 from dotenv import load_dotenv
-# Import Finnhub client
-from src.mcp_servers.finnhub_client import get_finnhub_news
+# Import new News client
+from src.mcp_servers.news_client import get_market_news
 
 # Load .env file from project root
 _project_root = Path(__file__).parent.parent.parent
@@ -31,7 +31,7 @@ class ToolCallRequest(BaseModel):
 SEARCH_TOOLS = [
     {
         "name": "get_market_insights",
-        "description": "Get market news and insights for a specific stock from Finnhub. Returns a concise list of recent news items.",
+        "description": "Get market news and insights for a specific stock. Returns a list of recent news items with sentiment analysis.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -39,14 +39,10 @@ SEARCH_TOOLS = [
                     "type": "string",
                     "description": "Stock symbol to filter news (optional)"
                 },
-                "category": {
-                    "type": "string",
-                    "enum": ["general", "forex", "crypto", "merger"],
-                    "description": "News category"
-                },
-                "min_id": {
+                "limit": {
                     "type": "integer",
-                    "description": "Return only news items with ID greater than this value"
+                    "description": "Number of news items to return (default 5)",
+                    "default": 5
                 }
             },
             "required": []
@@ -68,9 +64,11 @@ async def call_tool(request: ToolCallRequest):
     try:
         if request.name == "get_market_insights":
             symbol = request.arguments.get("symbol", "")
-            category = request.arguments.get("category", "general")
-            min_id = request.arguments.get("min_id", 0)
-            result = get_finnhub_news(symbol=symbol, category=category, min_id=min_id)
+            limit = request.arguments.get("limit", 5)
+            
+            # Note: For the live server, we don't filter by date (get latest).
+            # Backtest will use the client directly with date parameters.
+            result = get_market_news(ticker=symbol, limit=limit)
             
             if "error" in result:
                 return {

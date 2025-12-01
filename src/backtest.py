@@ -24,7 +24,7 @@ from src.config import Config
 from src.agent import TradingAgent
 from src.mcp_servers.math_server import MATH_TOOLS
 from src.mcp_servers.search_server import SEARCH_TOOLS
-from src.mcp_servers.finnhub_client import get_finnhub_news
+from src.mcp_servers.news_client import get_market_news
 import math
 
 
@@ -389,6 +389,26 @@ class BacktestAgent:
         for tool in MATH_TOOLS:
             tools.append(convert_to_openai(tool))
         
+        # Add batch calculation tool
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "batch_calculate",
+                "description": "Calculate multiple mathematical expressions in a single call. More efficient than calling calculate multiple times.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "expressions": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of mathematical expressions to evaluate (e.g., ['15 * 88.18', '3 * 234.74', '7 * 196.23'])"
+                        }
+                    },
+                    "required": ["expressions"]
+                }
+            }
+        })
+        
         # Add Search tools (modified to hide time parameters from agent)
         for tool in SEARCH_TOOLS:
             tool_copy = tool.copy()
@@ -402,6 +422,8 @@ class BacktestAgent:
                     del props["time_from"]
                 if "time_to" in props:
                     del props["time_to"]
+                
+                # Ensure limit is present and category/min_id are removed if they exist (cleanup from old tool)
                 
                 schema["properties"] = props
                 tool_copy["inputSchema"] = schema
@@ -603,14 +625,28 @@ class BacktestAgent:
                 return {"content": [{"type": "text", "text": f"{percentage_change:.2f}%"}]}
             except Exception as e:
                 return {"content": [{"type": "text", "text": f"Error calculating percentage: {e}"}]}
+        elif tool_name == "batch_calculate":
+            expressions = args.get("expressions", [])
+            results = []
+            try:
+                for expr in expressions:
+                    result = eval(expr, {"__builtins__": {}}, {"math": math, "sqrt": math.sqrt, "pow": pow})
+                    results.append({"expression": expr, "result": result})
+                return {"content": [{"type": "text", "text": json.dumps(results, indent=2)}]}
+            except Exception as e:
+                return {"content": [{"type": "text", "text": f"Error in batch calculation: {e}"}]}
                 
         # Search tools
         elif tool_name == "get_market_insights":
             symbol = args.get("symbol", "")
-            category = args.get("category", "general")
-            min_id = args.get("min_id", 0)
+            limit = args.get("limit", 5)
             
-            result = get_finnhub_news(symbol=symbol, category=category, min_id=min_id)
+            # Use current backtest date for historical news
+            # We want news published on or before the current date
+            current_date = stock_server.current_date
+            
+            # Call the new news client
+            result = get_market_news(ticker=symbol, limit=limit, published_utc_lte=current_date)
             
             if "error" in result:
                 return {"content": [{"type": "text", "text": f"Error: {result['error']}"}]}
@@ -643,10 +679,10 @@ CRITICAL TRADING RULES:
 
 CRITICAL: You MUST complete ALL of the following steps before finishing. DO NOT skip any steps:
 
-STEP 1: Gather market insights using get_market_insights for all available symbols
+STEP 1: Gather market insights using get_market_insights. You can specify a ticker symbol to get news for that specific stock or list of tickers
 STEP 2: Get current prices using get_prices_batch for ALL symbols (REQUIRED before any trades)
 STEP 3: Analyze your current portfolio using get_portfolio
-STEP 4: Calculate valuations and potential returns
+STEP 4: Calculate valuations and potential returns using batch_calculate to save steps (e.g., batch_calculate with all position values at once)
 STEP 5: Make a trading decision:
    - If you have cash and see opportunities: BUY stocks (include price parameter!)
    - If prices have moved: consider SELLING or REBALANCING (include price parameter!)
@@ -661,6 +697,8 @@ IMPORTANT RULES:
 - DO NOT output {self.STOP_SIGNAL} until you have checked prices and made trading decisions
 - Simply gathering news is NOT enough - you must analyze prices and execute trades or explicitly decide to hold
 - Be EFFICIENT with your steps - you only have {max_steps} total!
+- Use batch_calculate for multiple calculations instead of calling calculate multiple times
+- Use get_market_insights with specific ticker symbols when you want targeted news (e.g., symbol="AAPL")
 - BUY/SELL ORDERS REQUIRE price AS A NUMBER - always include it!
 
 Thinking standards:
@@ -708,10 +746,10 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
         ]
         step_count = 0
         logs = []
+        api_calls = 0  # Track total API calls for debugging
         
         while step_count < max_steps:
-            step_count += 1
-            print(f"  Step {step_count}/{max_steps}")
+            api_calls += 1
             
             try:
                 response = self.client.chat.completions.create(
@@ -725,14 +763,35 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
                 message = response.choices[0].message
                 messages.append(message)
                 
+                # Check if this step has meaningful content (reasoning or tool calls)
+                has_reasoning = message.content and message.content.strip()
+                has_tool_calls = message.tool_calls
+                
+                # Only count steps with actual work
+                if has_reasoning or has_tool_calls:
+                    step_count += 1
+                    print(f"  Step {step_count}/{max_steps}")
+                else:
+                    # Empty processing step - don't count it, but continue the loop
+                    continue
+                
                 # Check for stop signal
                 if message.content and self.STOP_SIGNAL in message.content:
-                    print(f"  ✓ Agent completed")
+                    print(f"  ✓ Agent completed (API calls: {api_calls}, counted steps: {step_count})")
                     logs.append({"step": step_count, "type": "stop", "content": message.content})
                     break
                 
                 # Handle tool calls
                 if message.tool_calls:
+                    # Log agent reasoning if present (even when making tool calls)
+                    if message.content:
+                        print(f"\n  [AGENT REASONING]\n  {message.content}\n")
+                        logs.append({
+                            "step": step_count, 
+                            "type": "reasoning", 
+                            "content": message.content
+                        })
+                    
                     for tool_call in message.tool_calls:
                         tool_name = tool_call.function.name
                         try:
@@ -740,7 +799,7 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
                         except json.JSONDecodeError:
                             tool_args = {}
                         
-                        print(f"    Tool: {tool_name}({tool_args})")
+                        print(f"    [TOOL CALL] {tool_name}({tool_args})")
                         
                         tool_result = self._call_tool(tool_name, tool_args, stock_server, trade_server)
                         
@@ -761,33 +820,11 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
                         
                         result_text = tool_result.get("content", [{}])[0].get("text", "")
                         print(f"      → {result_text[:80]}...")
-                    
-                    # Inject step count reminder after tool calls
-                    steps_remaining = max_steps - step_count
-                    if steps_remaining <= 5:
-                        urgency_msg = f"URGENT: Only {steps_remaining} steps remaining! You MUST complete your analysis and trades NOW or you will run out of steps."
-                    elif steps_remaining <= 10:
-                        urgency_msg = f"Warning: {steps_remaining} steps remaining. Please work efficiently to complete all required steps."
-                    else:
-                        urgency_msg = f"Steps remaining: {steps_remaining}/{max_steps}"
-                    
-                    messages.append({
-                        "role": "user",
-                        "content": urgency_msg
-                    })
                 else:
                     if message.content:
-                        print(f"💬 {message.content[:100]}...")
+                        # Print reasoning clearly
+                        print(f"\n  [AGENT REASONING]\n  {message.content}\n")
                         logs.append({"step": step_count, "type": "message", "content": message.content})
-                    
-                    # Also inject step reminder for non-tool responses
-                    steps_remaining = max_steps - step_count
-                    if steps_remaining > 0:
-                        if steps_remaining <= 5:
-                            urgency_msg = f"URGENT: Only {steps_remaining} steps remaining! Complete your work NOW."
-                        else:
-                            urgency_msg = f"Steps remaining: {steps_remaining}/{max_steps}"
-                        messages.append({"role": "user", "content": urgency_msg})
                 
             except Exception as e:
                 print(f"  ✗ Error: {e}")
@@ -803,13 +840,16 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
         
         self.portfolio.record_equity(date, prices)
         
-        return {
+        day_result = {
             "date": date,
             "steps": step_count,
+            "api_calls": api_calls,
             "logs": logs,
             "portfolio": self.portfolio.get_state_string(),
             "equity": self.portfolio.get_total_equity(prices)
         }
+        
+        return day_result
 
 
 def run_backtest(csv_path: Path = None, output_dir: Path = None):
@@ -849,6 +889,10 @@ def run_backtest(csv_path: Path = None, output_dir: Path = None):
     # Run backtest for each Monday
     results = []
     
+    # Create daily logs directory
+    daily_logs_dir = output_dir / "daily_logs"
+    daily_logs_dir.mkdir(parents=True, exist_ok=True)
+    
     for i, monday in enumerate(mondays):
         print(f"\n[{i+1}/{len(mondays)}] Processing {monday}...")
         
@@ -858,12 +902,19 @@ def run_backtest(csv_path: Path = None, output_dir: Path = None):
             
             print(f"  Equity: ${result['equity']:.2f}")
             
-            # Save results incrementally after each day
+            # Save individual day log immediately
+            day_log_file = daily_logs_dir / f"day_{monday}.json"
+            with open(day_log_file, 'w') as f:
+                json.dump(result, f, indent=2)
+            
+            # Save cumulative results incrementally after each day
             results_file = output_dir / f"backtest_current.json"
             with open(results_file, 'w') as f:
                 json.dump({
                     "start_date": mondays[0] if mondays else None,
-                    "end_date": mondays[-1] if mondays else None,
+                    "end_date": monday,  # Current progress
+                    "days_completed": i + 1,
+                    "days_total": len(mondays),
                     "initial_capital": initial_capital,
                     "final_equity": portfolio.equity_history[-1]["equity"] if portfolio.equity_history else initial_capital,
                     "total_trades": len(portfolio.trades),
