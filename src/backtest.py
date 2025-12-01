@@ -20,6 +20,9 @@ import atexit
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+csv_path = "./data/backtest_results/backtest_20251201_184001.json"
+output_dir = "./data/backtest_results"
+
 from src.config import Config
 
 from src.tools import pricing, news, trading, math_tools
@@ -267,8 +270,8 @@ class BacktestAgent:
             api_key=api_key,
             base_url=api_base,
             default_headers={
-                "HTTP-Referer": "https://github.com/tradebot",
-                "X-Title": "Trading Bot Backtest"
+                "HTTP-Referer": "https://github.com/compound",
+                "X-Title": "Compound Backtest"
             }
         )
         
@@ -278,6 +281,8 @@ class BacktestAgent:
     def _get_tools(self) -> List[Dict[str, Any]]:
         """Define available tools for the agent."""
         tools = []
+        
+        # see tool definition best practices here: https://openrouter.ai/docs/guides/features/tool-calling#function-definition-guidelines
         
         # Math tools
         tools.extend([
@@ -344,7 +349,7 @@ class BacktestAgent:
                     "properties": {
                         "symbol": {
                             "type": "string",
-                            "description": "Optional stock ticker symbol to get news for"
+                            "description": "Stock ticker symbol to get news for"
                         },
                         "limit": {
                             "type": "integer",
@@ -674,6 +679,8 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
         print(f"Backtest: Running agent for {date}")
         print(f"{'='*60}")
         
+        # thos whole section follows the openrouter docs found here: https://openrouter.ai/docs/guides/features/tool-calling#a-simple-agentic-loop
+        
         # Configure the global context for this day
         self.context.configure(date, self.price_data, self.portfolio)
         
@@ -823,7 +830,7 @@ def run_backtest(csv_path: Path = None, output_dir: Path = None):
     print(f"  Last: {mondays[-1]}")
     
     # Initialize portfolio
-    initial_capital = config.trading_config.get("initial_capital", 5000.0)
+    initial_capital = config.trading_config.get("initial_capital")
     portfolio = BacktestPortfolio(initial_capital)
     
     # Create backtest agent
