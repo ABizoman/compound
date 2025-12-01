@@ -24,17 +24,9 @@ trading:
     - "TSLA"
     - "NFLX"
 
-# MCP Service URLs (for local testing, these will be localhost)
-mcp_services:
-  math: "http://localhost:8001"
-  search: "http://localhost:8002"
-  trade: "http://localhost:8003"
-  stock_local: "http://localhost:8004"
 
 # Data Storage
 data:
   base_dir: "./data"
-  positions_file: "positions.json"
-  logs_file: "logs.json"
-  daily_results_file: "daily_results.json"
+  
 

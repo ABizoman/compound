@@ -21,11 +21,9 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.config import Config
-from src.agent import TradingAgent
-from src.mcp_servers.math_server import MATH_TOOLS
-from src.mcp_servers.search_server import SEARCH_TOOLS
-from src.mcp_servers.news_client import get_market_news
-import math
+
+from src.tools import pricing, news, trading, math_tools
+from src.tools.context import get_context
 
 
 class HistoricalPriceData:
@@ -246,100 +244,6 @@ class BacktestPortfolio:
         return portfolio_text
 
 
-class BacktestStockServer:
-    """Mock stock server that returns historical prices."""
-    
-    def __init__(self, price_data: HistoricalPriceData, current_date: str):
-        self.price_data = price_data
-        self.current_date = current_date
-    
-    def get_current_price(self, symbol: str) -> Dict[str, Any]:
-        """Get current price for a symbol."""
-        close = self.price_data.get_close_price(symbol, self.current_date)
-        if close:
-            return {"content": [{"type": "text", "text": f"{symbol}: ${close:.2f}"}]}
-        return {"content": [{"type": "text", "text": f"Error: No price data for {symbol} on {self.current_date}"}]}
-    
-    def get_prices_batch(self, symbols: List[str]) -> Dict[str, Any]:
-        """Get prices for multiple symbols."""
-        results = {}
-        for symbol in symbols:
-            close = self.price_data.get_close_price(symbol, self.current_date)
-            if close:
-                results[symbol] = close
-        return {"content": [{"type": "text", "text": json.dumps(results, indent=2)}]}
-    
-    def get_daily_ohlc(self, symbol: str, days: int = 1) -> Dict[str, Any]:
-        """Get OHLC data for a symbol."""
-        price_data = self.price_data.get_price(symbol, self.current_date)
-        if price_data:
-            return {
-                "content": [
-                    {"type": "text", "text": json.dumps([{
-                        "date": self.current_date,
-                        "open": price_data.get("open"),
-                        "high": price_data.get("high"),
-                        "low": price_data.get("low"),
-                        "close": price_data.get("close"),
-                        "volume": price_data.get("volume")
-                    }], indent=2)}
-                ]
-            }
-        return {"content": [{"type": "text", "text": f"Error: No OHLC data for {symbol}"}]}
-
-
-class BacktestTradeServer:
-    """Mock trade server that executes trades on backtest portfolio."""
-    
-    def __init__(self, portfolio: BacktestPortfolio, current_date: str):
-        self.portfolio = portfolio
-        self.current_date = current_date
-    
-    def buy_stock(self, symbol: str, quantity: float, price: float = None) -> Dict[str, Any]:
-        """Buy stock."""
-        if price is None:
-            return {"content": [{"type": "text", "text": "Error: Price required for buy order"}]}
-        
-        result = self.portfolio.buy(symbol, quantity, price, self.current_date)
-        if "error" in result:
-            return {"content": [{"type": "text", "text": f"Error: {result['error']}"}]}
-        
-        trade = result["trade"]
-        return {
-            "content": [
-                {"type": "text", "text": f"Bought {quantity} shares of {symbol} at ${price:.2f}. "
-                                         f"Total: ${trade['total']:.2f}. Cash: ${self.portfolio.cash:.2f}"}
-            ]
-        }
-    
-    def sell_stock(self, symbol: str, quantity: float, price: float = None) -> Dict[str, Any]:
-        """Sell stock."""
-        if price is None:
-            return {"content": [{"type": "text", "text": "Error: Price required for sell order"}]}
-        
-        result = self.portfolio.sell(symbol, quantity, price, self.current_date)
-        if "error" in result:
-            return {"content": [{"type": "text", "text": f"Error: {result['error']}"}]}
-        
-        trade = result["trade"]
-        return {
-            "content": [
-                {"type": "text", "text": f"Sold {quantity} shares of {symbol} at ${price:.2f}. "
-                                         f"Total: ${trade['total']:.2f}. Cash: ${self.portfolio.cash:.2f}"}
-            ]
-        }
-    
-    def get_portfolio(self) -> Dict[str, Any]:
-        """Get portfolio state."""
-        return {"content": [{"type": "text", "text": self.portfolio.get_state_string()}]}
-    
-    def get_position(self, symbol: str) -> Dict[str, Any]:
-        """Get position for a symbol."""
-        if symbol in self.portfolio.positions:
-            pos = self.portfolio.positions[symbol]
-            return {"content": [{"type": "text", "text": f"{symbol}: {pos['shares']:.2f} shares @ avg ${pos['avg_cost']:.2f}"}]}
-        return {"content": [{"type": "text", "text": f"No position in {symbol}"}]}
-
 
 class BacktestAgent:
     """Trading agent modified for backtesting with historical data."""
@@ -352,6 +256,7 @@ class BacktestAgent:
         self.trading_config = config.trading_config
         self.price_data = price_data
         self.portfolio = portfolio
+        self.context = get_context()  # Get global context
         
         # Initialize OpenAI client
         from openai import OpenAI
@@ -374,61 +279,82 @@ class BacktestAgent:
         """Define available tools for the agent."""
         tools = []
         
-        # Helper to convert MCP tool to OpenAI format
-        def convert_to_openai(tool_def):
-            return {
+        # Math tools
+        tools.extend([
+            {
                 "type": "function",
                 "function": {
-                    "name": tool_def["name"],
-                    "description": tool_def["description"],
-                    "parameters": tool_def.get("inputSchema", {})
+                    "name": "calculate",
+                    "description": "Perform basic mathematical calculations (addition, subtraction, multiplication, division, exponentiation, etc.). Supports expressions like '2+2', '10*5', 'sqrt(16)', 'pow(2,3)'",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "expression": {
+                                "type": "string",
+                                "description": "Mathematical expression to evaluate"
+                            }
+                        },
+                        "required": ["expression"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "calculate_percentage",
+                    "description": "Calculate percentage change between two values",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "old_value": {"type": "number", "description": "Original value"},
+                            "new_value": {"type": "number", "description": "New value"}
+                        },
+                        "required": ["old_value", "new_value"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "batch_calculate",
+                    "description": "Calculate multiple mathematical expressions in a single call. More efficient than calling calculate multiple times.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "expressions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of mathematical expressions to evaluate (e.g., ['15 * 88.18', '3 * 234.74', '7 * 196.23'])"
+                            }
+                        },
+                        "required": ["expressions"]
+                    }
                 }
             }
-
-        # Add Math tools
-        for tool in MATH_TOOLS:
-            tools.append(convert_to_openai(tool))
+        ])
         
-        # Add batch calculation tool
+        # News/Search tools
         tools.append({
             "type": "function",
             "function": {
-                "name": "batch_calculate",
-                "description": "Calculate multiple mathematical expressions in a single call. More efficient than calling calculate multiple times.",
+                "name": "get_market_insights",
+                "description": "Get market news and insights for a specific stock ticker or general market news",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "expressions": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of mathematical expressions to evaluate (e.g., ['15 * 88.18', '3 * 234.74', '7 * 196.23'])"
+                        "symbol": {
+                            "type": "string",
+                            "description": "Optional stock ticker symbol to get news for"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of news items to return (default 5)",
+                            "default": 5
                         }
-                    },
-                    "required": ["expressions"]
+                    }
                 }
             }
         })
-        
-        # Add Search tools (modified to hide time parameters from agent)
-        for tool in SEARCH_TOOLS:
-            tool_copy = tool.copy()
-            if "inputSchema" in tool_copy:
-                # Create a deep copy of inputSchema to avoid modifying the original
-                schema = json.loads(json.dumps(tool_copy["inputSchema"]))
-                props = schema.get("properties", {})
-                
-                # Remove time_from and time_to from properties if they exist
-                if "time_from" in props:
-                    del props["time_from"]
-                if "time_to" in props:
-                    del props["time_to"]
-                
-                # Ensure limit is present and category/min_id are removed if they exist (cleanup from old tool)
-                
-                schema["properties"] = props
-                tool_copy["inputSchema"] = schema
-            
-            tools.append(convert_to_openai(tool_copy))
         
         # Add Stock tools
         tools.append({
@@ -573,88 +499,102 @@ class BacktestAgent:
                 }
             }
         })
+        
+        # Add FINISH_SIGNAL tool - agent calls this when done
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "FINISH_SIGNAL",
+                "description": "Call this tool when you have completed all analysis and trading for today. Only call after: 1) Getting market insights, 2) Checking prices, 3) Analyzing portfolio, 4) Making trading decisions (buy/sell/hold)",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
             
         return tools
     
-    def _call_tool(self, tool_name: str, args: Dict[str, Any], 
-                   stock_server: BacktestStockServer, trade_server: BacktestTradeServer) -> Dict[str, Any]:
-        """Execute a tool call."""
-        # Stock tools
-        if tool_name == "get_current_price":
-            return stock_server.get_current_price(args.get("symbol", "").upper())
-        elif tool_name == "get_prices_batch":
-            symbols = [s.upper() for s in args.get("symbols", [])]
-            return stock_server.get_prices_batch(symbols)
-        elif tool_name == "get_daily_ohlc":
-            return stock_server.get_daily_ohlc(args.get("symbol", "").upper(), args.get("days", 1))
+    def _call_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a tool call - tools use context internally for date/portfolio."""
+        try:
+            # Pricing tools - no date/context params needed, tools use global context
+            if tool_name == "get_current_price":
+                result = pricing.get_current_price(args.get("symbol", "").upper())
+                return {"content": [{"type": "text", "text": result}]}
             
-        # Trade tools
-        elif tool_name == "buy_stock":
-            return trade_server.buy_stock(
-                args.get("symbol", "").upper(),
-                float(args.get("quantity", 0)),
-                float(args.get("price")) if args.get("price") else None
-            )
-        elif tool_name == "sell_stock":
-            return trade_server.sell_stock(
-                args.get("symbol", "").upper(),
-                float(args.get("quantity", 0)),
-                float(args.get("price")) if args.get("price") else None
-            )
-        elif tool_name == "get_portfolio":
-            return trade_server.get_portfolio()
-        elif tool_name == "get_position":
-            return trade_server.get_position(args.get("symbol", "").upper())
+            elif tool_name == "get_prices_batch":
+                symbols = [s.upper() for s in args.get("symbols", [])]
+                result = pricing.get_prices_batch(symbols)
+                return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
             
-        # Math tools
-        elif tool_name == "calculate":
-            expression = args.get("expression", "")
-            try:
-                # Safe evaluation of mathematical expressions
-                result = eval(expression, {"__builtins__": {}}, {"math": math, "sqrt": math.sqrt, "pow": pow})
-                return {"content": [{"type": "text", "text": str(result)}]}
-            except Exception as e:
-                return {"content": [{"type": "text", "text": f"Error calculating: {e}"}]}
-        elif tool_name == "calculate_percentage":
-            try:
-                old_value = float(args.get("old_value", 0))
-                new_value = float(args.get("new_value", 0))
-                if old_value == 0:
-                    return {"content": [{"type": "text", "text": "Error: Cannot calculate percentage change when old_value is 0"}]}
-                percentage_change = ((new_value - old_value) / old_value) * 100
-                return {"content": [{"type": "text", "text": f"{percentage_change:.2f}%"}]}
-            except Exception as e:
-                return {"content": [{"type": "text", "text": f"Error calculating percentage: {e}"}]}
-        elif tool_name == "batch_calculate":
-            expressions = args.get("expressions", [])
-            results = []
-            try:
-                for expr in expressions:
-                    result = eval(expr, {"__builtins__": {}}, {"math": math, "sqrt": math.sqrt, "pow": pow})
-                    results.append({"expression": expr, "result": result})
-                return {"content": [{"type": "text", "text": json.dumps(results, indent=2)}]}
-            except Exception as e:
-                return {"content": [{"type": "text", "text": f"Error in batch calculation: {e}"}]}
+            elif tool_name == "get_daily_ohlc":
+                result = pricing.get_daily_ohlc(args.get("symbol", "").upper(), args.get("days", 1))
+                if result:
+                    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+                return {"content": [{"type": "text", "text": f"Error: No OHLC data for {args.get('symbol')}"}]}
+            
+            # Trading tools - no portfolio/date params needed
+            elif tool_name == "buy_stock":
+                result = trading.buy_stock(
+                    args.get("symbol", "").upper(),
+                    float(args.get("quantity", 0)),
+                    float(args.get("price")) if args.get("price") else None
+                )
+                return {"content": [{"type": "text", "text": result}]}
+            
+            elif tool_name == "sell_stock":
+                result = trading.sell_stock(
+                    args.get("symbol", "").upper(),
+                    float(args.get("quantity", 0)),
+                    float(args.get("price")) if args.get("price") else None
+                )
+                return {"content": [{"type": "text", "text": result}]}
+            
+            elif tool_name == "get_portfolio":
+                result = trading.get_portfolio()
+                return {"content": [{"type": "text", "text": result}]}
+            
+            elif tool_name == "get_position":
+                result = trading.get_position(args.get("symbol", "").upper())
+                return {"content": [{"type": "text", "text": result}]}
+            
+            # Math tools 
+            elif tool_name == "calculate":
+                result = math_tools.calculate(args.get("expression", ""))
+                return {"content": [{"type": "text", "text": result}]}
+            
+            elif tool_name == "calculate_percentage":
+                result = math_tools.calculate_percentage(
+                    float(args.get("old_value", 0)),
+                    float(args.get("new_value", 0))
+                )
+                return {"content": [{"type": "text", "text": result}]}
+            
+            elif tool_name == "batch_calculate":
+                result = math_tools.batch_calculate(args.get("expressions", []))
+                return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+            
+            # News tools - no date param needed, uses context
+            elif tool_name == "get_market_insights":
+                symbol = args.get("symbol", "")
+                limit = args.get("limit", 5)
+                result = news.get_market_insights(ticker=symbol, limit=limit)
                 
-        # Search tools
-        elif tool_name == "get_market_insights":
-            symbol = args.get("symbol", "")
-            limit = args.get("limit", 5)
+                if "error" in result:
+                    return {"content": [{"type": "text", "text": f"Error: {result['error']}"}]}
+                
+                return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
             
-            # Use current backtest date for historical news
-            # We want news published on or before the current date
-            current_date = stock_server.current_date
+            # Handle FINISH_SIGNAL as a tool call (agent sometimes calls it as a tool)
+            elif tool_name == "FINISH_SIGNAL" or tool_name == "finish_signal":
+                return {"content": [{"type": "text", "text": "<FINISH_SIGNAL>"}], "is_finish": True}
             
-            # Call the new news client
-            result = get_market_news(ticker=symbol, limit=limit, published_utc_lte=current_date)
-            
-            if "error" in result:
-                return {"content": [{"type": "text", "text": f"Error: {result['error']}"}]}
-            
-            return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
-            
-        else:
-            return {"content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}]}
+            else:
+                return {"content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}]}
+        
+        except Exception as e:
+            return {"content": [{"type": "text", "text": f"Error calling {tool_name}: {str(e)}"}]}
     
     def get_system_prompt(self, today_date: str, max_steps: int) -> str:
         """Generate system prompt with step count awareness."""
@@ -734,9 +674,8 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
         print(f"Backtest: Running agent for {date}")
         print(f"{'='*60}")
         
-        # Create mock servers for this date
-        stock_server = BacktestStockServer(self.price_data, date)
-        trade_server = BacktestTradeServer(self.portfolio, date)
+        # Configure the global context for this day
+        self.context.configure(date, self.price_data, self.portfolio)
         
         # Initialize conversation
         max_steps = self.trading_config.get("max_steps_per_day", 15)
@@ -746,7 +685,7 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
         ]
         step_count = 0
         logs = []
-        api_calls = 0  # Track total API calls for debugging
+        api_calls = 0
         
         while step_count < max_steps:
             api_calls += 1
@@ -763,27 +702,21 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
                 message = response.choices[0].message
                 messages.append(message)
                 
-                # Check if this step has meaningful content (reasoning or tool calls)
                 has_reasoning = message.content and message.content.strip()
                 has_tool_calls = message.tool_calls
                 
-                # Only count steps with actual work
                 if has_reasoning or has_tool_calls:
                     step_count += 1
                     print(f"  Step {step_count}/{max_steps}")
                 else:
-                    # Empty processing step - don't count it, but continue the loop
                     continue
                 
-                # Check for stop signal
                 if message.content and self.STOP_SIGNAL in message.content:
                     print(f"  ✓ Agent completed (API calls: {api_calls}, counted steps: {step_count})")
                     logs.append({"step": step_count, "type": "stop", "content": message.content})
                     break
                 
-                # Handle tool calls
                 if message.tool_calls:
-                    # Log agent reasoning if present (even when making tool calls)
                     if message.content:
                         print(f"\n  [AGENT REASONING]\n  {message.content}\n")
                         logs.append({
@@ -792,6 +725,7 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
                             "content": message.content
                         })
                     
+                    should_finish = False
                     for tool_call in message.tool_calls:
                         tool_name = tool_call.function.name
                         try:
@@ -801,7 +735,8 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
                         
                         print(f"    [TOOL CALL] {tool_name}({tool_args})")
                         
-                        tool_result = self._call_tool(tool_name, tool_args, stock_server, trade_server)
+                        # Call tool - simplified, no context params needed
+                        tool_result = self._call_tool(tool_name, tool_args)
                         
                         messages.append({
                             "role": "tool",
@@ -820,9 +755,17 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
                         
                         result_text = tool_result.get("content", [{}])[0].get("text", "")
                         print(f"      → {result_text[:80]}...")
+                        
+                        # Check if this was a finish signal
+                        if tool_result.get("is_finish"):
+                            should_finish = True
+                    
+                    if should_finish:
+                        print(f"  ✓ Agent completed via FINISH_SIGNAL tool (API calls: {api_calls}, counted steps: {step_count})")
+                        logs.append({"step": step_count, "type": "stop", "content": "FINISH_SIGNAL tool called"})
+                        break
                 else:
                     if message.content:
-                        # Print reasoning clearly
                         print(f"\n  [AGENT REASONING]\n  {message.content}\n")
                         logs.append({"step": step_count, "type": "message", "content": message.content})
                 
