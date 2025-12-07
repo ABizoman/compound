@@ -1,6 +1,7 @@
 # Compound: An Autonomous Investing Framework
 
-Compound is a backtesting harness that lets an LLM-driven trading agent practice making decisions over historical equity data. The agent sees realistic tools for prices, news, math, and trading, but the framework swaps in historical data so the model behaves as if it were live.
+Compound automates the entire process of investing in the stock market from research to trade execution through the use of LLM models and MCP tools. The agent sees & executes tools for prices, news, math, and trading, allowing it to conduct it's own research, produce a reasoning, and act on it's decisions all without the need for human intervention.
+
 
 ## Project Layout
 - `config.yaml` — model/provider settings, trading symbols, capital, and step budget.
@@ -9,6 +10,98 @@ Compound is a backtesting harness that lets an LLM-driven trading agent practice
 - `src/tools/` — tool implementations the agent can call (`pricing`, `trading`, `news`, `math_tools`) plus the `context` abstraction that routes requests to historical data during simulation.
 - `data/10ticker12monthDaily.csv` — sample price history used for default runs.
 - `data/backtest_results/` — JSON artifacts from previous runs (full summary plus per-day logs).
+
+## Agent Tools
+All tools given to the LLM follow the same MCP format, following the recommendation found in the [openrouter docs](https://openrouter.ai/docs/guides/features/tool-calling#function-definition-guidelines):
+```json
+{
+    "type": "function",
+    "function": {
+        "name": "tool_name",
+        "description": "A consicsise explanation for what this tool is and what it should be user for.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "proerty1": "string",
+                "property2": "int"
+            },
+            "required": ["property1"]
+        }
+ }
+```
+
+### Price
+
+### Maths
+**MCP Tools**
+```json
+{
+    "type": "function",
+    "function": {
+        "name": "calculate",
+        "description": "Perform basic mathematical calculations (addition, subtraction, multiplication, division, exponentiation, etc.). Supports expressions like '2+2', '10*5', 'sqrt(16)', 'pow(2,3)'",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "Mathematical expression to evaluate"
+                }
+            },
+            "required": ["expression"]
+        }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+        "name": "calculate_percentage",
+        "description": "Calculate percentage change between two values",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "old_value": {"type": "number", "description": "Original value"},
+                "new_value": {"type": "number", "description": "New value"}
+            },
+            "required": ["old_value", "new_value"]
+        }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+        "name": "batch_calculate",
+        "description": "Calculate multiple mathematical expressions in a single call. More efficient than calling calculate multiple times.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "expressions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of mathematical expressions to evaluate (e.g., ['15 * 88.18', '3 * 234.74', '7 * 196.23'])"
+                }
+            },
+            "required": ["expressions"]
+        }
+    }
+   }
+```
+**Python Functions**
+```python
+// takes are argument python expression, executes it, returns the result
+def calculate(expression: str) -> str:
+
+def calculate_percentage(old_value: float, new_value: float) -> str:
+
+def batch_calculate(expressions: List[str]) -> List[Dict[str, Any]]:
+
+```
+
+### News
+
+### Trade Execution
+
+
 
 ## Setup
 1) Use Python 3.10+ and create a virtual environment:
