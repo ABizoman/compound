@@ -1,32 +1,33 @@
 """
-Backtest context module - provides date abstraction layer.
+Backtest Context Management Module.
 
-This module holds the current simulation state so that tool functions
-can be called without explicitly passing backtest-specific parameters.
-The AI agent remains completely unaware that it's operating on historical data.
+This module implements a singleton context manager that maintains the state of the
+backtesting simulation. It serves as an abstraction layer, allowing trading tools
+to operate seamlessly in both production and backtesting environments without
+requiring modification. By injecting historical state (dates, prices, portfolio)
+globally, the AI agent interacts with the system as if it were live, unaware
+that it is processing historical data.
 """
 
 from typing import Optional, Any
-from threading import Lock
 
 
 class BacktestContext:
-    """Singleton context holding current backtest state.
-    
-    This abstraction layer allows tools to be called with the same
-    signatures they would have in production, while internally
-    using historical data for the simulated current date.
+    """
+    A Singleton class that encapsulates the current backtesting state.
+
+    This class ensures that only one instance of the simulation context exists
+    throughout the application lifecycle. It manages the simulated current date,
+    historical price data access, and the portfolio state, enabling tools to
+    retrieve context-aware data without explicit parameter passing.
     """
     
     _instance = None
-    _lock = Lock()
     
     def __new__(cls):
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
     
     def __init__(self):
@@ -39,12 +40,16 @@ class BacktestContext:
         self._initialized = True
     
     def configure(self, current_date: str, price_data: Any, portfolio: Any):
-        """Configure the context for a specific backtest day.
-        
+        """
+        Initializes the backtest context with simulation parameters.
+
+        This method sets up the environment for a specific point in the simulation,
+        enabling backtest mode.
+
         Args:
-            current_date: The simulated current date (YYYY-MM-DD)
-            price_data: HistoricalPriceData instance
-            portfolio: BacktestPortfolio instance
+            current_date (str): The date currently being simulated in 'YYYY-MM-DD' format.
+            price_data (Any): The source of historical price data for the simulation.
+            portfolio (Any): The portfolio instance tracking positions and value during the backtest.
         """
         self._current_date = current_date
         self._price_data = price_data
@@ -52,7 +57,12 @@ class BacktestContext:
         self._is_backtest_mode = True
     
     def reset(self):
-        """Reset context to production mode (no backtest)."""
+        """
+        Clears the backtest context and reverts to production mode.
+
+        This removes all simulation state (date, price data, portfolio) and sets
+        the backtest mode flag to False.
+        """
         self._current_date = None
         self._price_data = None
         self._portfolio = None
@@ -60,22 +70,22 @@ class BacktestContext:
     
     @property
     def current_date(self) -> Optional[str]:
-        """Get the current simulated date."""
+        """Returns the current date being simulated in the backtest."""
         return self._current_date
     
     @property
     def price_data(self) -> Optional[Any]:
-        """Get the historical price data source."""
+        """Returns the historical price data provider associated with the current backtest."""
         return self._price_data
     
     @property
     def portfolio(self) -> Optional[Any]:
-        """Get the portfolio instance."""
+        """Returns the current state of the portfolio in the backtest."""
         return self._portfolio
     
     @property
     def is_backtest_mode(self) -> bool:
-        """Check if running in backtest mode."""
+        """Returns True if the system is currently running in a backtest simulation."""
         return self._is_backtest_mode
 
 
@@ -84,15 +94,20 @@ _context = BacktestContext()
 
 
 def get_context() -> BacktestContext:
-    """Get the global backtest context."""
+    """Retrieves the global singleton instance of the BacktestContext."""
     return _context
 
 
 def set_current_date(date: str):
-    """Convenience function to update just the current date."""
+    """
+    Updates the simulated current date in the global context.
+
+    Args:
+        date (str): The new date to set as the current simulation date.
+    """
     _context._current_date = date
 
 
 def get_current_date() -> Optional[str]:
-    """Get the current simulated date."""
+    """Retrieves the currently simulated date from the global context."""
     return _context.current_date

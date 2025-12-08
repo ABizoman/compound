@@ -31,6 +31,74 @@ All tools given to the LLM follow the same MCP format, following the recommendat
 ```
 
 ### Price
+**MCP Tools**
+```json
+{
+    "type": "function",
+    "function": {
+        "name": "get_current_price",
+        "description": "Get the current price of a stock symbol",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "The stock ticker symbol (e.g., AAPL, GOOGL)"
+                }
+            },
+            "required": ["symbol"]
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "get_prices_batch",
+        "description": "Get current prices for multiple stock symbols at once",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbols": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of stock ticker symbols"
+                }
+            },
+            "required": ["symbols"]
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "get_daily_ohlc",
+        "description": "Get daily OHLC (Open, High, Low, Close) data for a stock",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "The stock ticker symbol"
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Number of days of data to retrieve",
+                    "default": 1
+                }
+            },
+            "required": ["symbol"]
+        }
+    }
+}
+```
+**Python Functions**
+```python
+def get_current_price(symbol: str) -> str:
+
+def get_prices_batch(symbols: List[str]) -> Dict[str, float]:
+
+def get_daily_ohlc(symbol: str, days: int = 1) -> Optional[List[Dict[str, Any]]]:
+```
 
 ### Maths
 **MCP Tools**
@@ -51,8 +119,8 @@ All tools given to the LLM follow the same MCP format, following the recommendat
             "required": ["expression"]
         }
     }
-   },
-   {
+},
+{
     "type": "function",
     "function": {
         "name": "calculate_percentage",
@@ -66,8 +134,8 @@ All tools given to the LLM follow the same MCP format, following the recommendat
             "required": ["old_value", "new_value"]
         }
     }
-   },
-   {
+},
+{
     "type": "function",
     "function": {
         "name": "batch_calculate",
@@ -84,37 +152,150 @@ All tools given to the LLM follow the same MCP format, following the recommendat
             "required": ["expressions"]
         }
     }
-   }
+}
 ```
 **Python Functions**
 ```python
-// takes are argument python expression, executes it, returns the result
+# takes are argument python expression, executes it, returns the result
 def calculate(expression: str) -> str:
 
 def calculate_percentage(old_value: float, new_value: float) -> str:
 
 def batch_calculate(expressions: List[str]) -> List[Dict[str, Any]]:
-
 ```
 
 ### News
+**MCP Tools**
+```json
+{
+    "type": "function",
+    "function": {
+        "name": "get_market_insights",
+        "description": "Get market news and insights for a specific stock ticker or general market news",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Stock ticker symbol to get news for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of news items to return (default 5)",
+                    "default": 5
+                }
+            }
+        }
+    }
+}
+```
+**Python Functions**
+```python
+def get_market_insights(ticker: Optional[str] = None, limit: int = 5) -> Dict[str, Any]:
+```
 
-### Trade Execution
+### Trading
+**MCP Tools**
+```json
+{
+    "type": "function",
+    "function": {
+        "name": "buy_stock",
+        "description": "Buy shares of a stock. You MUST provide the current price - get it first using get_current_price or get_prices_batch.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "The stock ticker symbol to buy"
+                },
+                "quantity": {
+                    "type": "number",
+                    "description": "Number of shares to buy"
+                },
+                "price": {
+                    "type": "number",
+                    "description": "The current price per share (REQUIRED - get this from get_current_price first)"
+                }
+            },
+            "required": ["symbol", "quantity", "price"]
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "sell_stock",
+        "description": "Sell shares of a stock. You MUST provide the current price - get it first using get_current_price or get_prices_batch.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "The stock ticker symbol to sell"
+                },
+                "quantity": {
+                    "type": "number",
+                    "description": "Number of shares to sell"
+                },
+                "price": {
+                    "type": "number",
+                    "description": "The current price per share (REQUIRED - get this from get_current_price first)"
+                }
+            },
+            "required": ["symbol", "quantity", "price"]
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "get_portfolio",
+        "description": "Get the current portfolio state including cash and all positions",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "get_position",
+        "description": "Get the current position for a specific stock symbol",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "The stock ticker symbol"
+                }
+            },
+            "required": ["symbol"]
+        }
+    }
+}
+```
+**Python Functions**
+```python
+def buy_stock(symbol: str, quantity: float, price: float) -> str:
+
+def sell_stock(symbol: str, quantity: float, price: float) -> str:
+
+def get_portfolio() -> str:
+
+def get_position(symbol: str) -> str:
+```
 
 
 
 ## Setup
-1) Use Python 3.10+ and create a virtual environment:
-```
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-```
-2) Install dependencies:
+1) Install dependencies:
 ```
 pip install -U pip
 pip install pandas pyyaml python-dotenv openai requests
 ```
-3) Add required environment variables in `.env` (same directory as `config.yaml`):
+2) Add required environment variables in `.env` (same directory as `config.yaml`):
 - `OPENROUTER_API_KEY` — LLM access for decision-making.
 - `MASSIVE_API_KEY` — optional, enables `get_market_insights` news tool during runs.
 
