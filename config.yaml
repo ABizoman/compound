@@ -11,8 +11,8 @@ llm:
 # Trading Parameters
 trading:
   initial_capital: 5000.0  # Starting capital in USD
-  max_steps_per_day: 15  # Maximum LLM tool-call iterations per day
-  symbols:  # List of symbols to trade (default: NASDAQ 100)
+  max_steps_per_day: 25  # Maximum LLM tool-call iterations per day
+  symbols:  # List of symbols to trade, chosen as s&p 500 top 20 stocks in dec 2024 (info got from perplexity)
     - "NVDA"
     - "MSFT"
     - "AAPL"
@@ -23,6 +23,16 @@ trading:
     - "AVGO"
     - "TSLA"
     - "NFLX"
+    - "BRK.B"
+    - "LLY"
+    - "JPM"
+    - "XOM"
+    - "JNJ"
+    - "UNH"
+    - "V"
+    - "PG"
+    - "HD"
+    - "MA"
 
 
 # Data Storage

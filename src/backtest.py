@@ -224,12 +224,13 @@ class BacktestPortfolio:
     
     def record_equity(self, date: str, prices: Dict[str, float]):
         """Record equity snapshot for this date."""
+        import copy
         equity = self.get_total_equity(prices)
         self.equity_history.append({
             "date": date,
             "equity": equity,
             "cash": self.cash,
-            "positions": dict(self.positions)
+            "positions": copy.deepcopy(self.positions)
         })
     
     def get_state_string(self) -> str:
@@ -685,7 +686,9 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
         self.context.configure(date, self.price_data, self.portfolio)
         
         # Initialize conversation
-        max_steps = self.trading_config.get("max_steps_per_day", 15)
+        max_steps = self.trading_config.get("max_steps_per_day")
+        # need proper error catching for this
+        
         messages = [
             {"role": "system", "content": self.get_system_prompt(date, max_steps)},
             {"role": "user", "content": f"Today is {date}. You have {max_steps} steps maximum. Analyze prices and make trading decisions efficiently."}
