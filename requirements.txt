@@ -1,0 +1,5 @@
+openai==2.15.0
+pandas==2.3.3
+python-dotenv==1.2.1
+PyYAML==6.0.3
+requests==2.32.5

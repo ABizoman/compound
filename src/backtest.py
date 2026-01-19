@@ -816,7 +816,7 @@ def run_backtest(csv_path: Path = None, output_dir: Path = None):
     
     # Set paths
     if csv_path is None:
-        csv_path = project_root / "data" / "10ticker12monthDaily.csv"
+        csv_path = project_root / "data" / "10ticker14monthsDaily.csv"
     if output_dir is None:
         output_dir = project_root / "data" / "backtest_results"
     
