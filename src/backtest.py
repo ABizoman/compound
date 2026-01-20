@@ -260,6 +260,8 @@ class BacktestAgent:
         self.trading_config = config.trading_config
         self.price_data = price_data
         self.portfolio = portfolio
+        self.output_dir = config.trading_config.get("output_dir", Path("./data/backtest_results"))
+        self.strategy_context_path = self.output_dir / "strategy_context.txt"
         self.context = get_context()  # Get global context
         
         # Initialize OpenAI client
@@ -506,15 +508,32 @@ class BacktestAgent:
             }
         })
         
-        # Add FINISH_SIGNAL tool - agent calls this when done
         tools.append({
             "type": "function",
             "function": {
                 "name": "FINISH_SIGNAL",
-                "description": "Call this tool when you have completed all analysis and trading for today. Only call after: 1) Getting market insights, 2) Checking prices, 3) Analyzing portfolio, 4) Making trading decisions (buy/sell/hold)",
+                "description": "Call this tool when you have completed all analysis and trading for today. Only call after: 1) Getting market insights, 2) Checking prices, 3) Analyzing portfolio, 4) Making trading decisions (buy/sell/hold), 5) Updating the strategy context if needed.",
                 "parameters": {
                     "type": "object",
                     "properties": {}
+                }
+            }
+        })
+
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "update_strategy_context",
+                "description": "Update the persistent long-term strategy note. This note will be read at the start of the next trading day. Use this to record your long-term plan, observations about market regime, or specific setups you are watching. This REPLACES the previous content, so be sure to include all important context you want to keep.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "The new FULL text of the strategy context/note."
+                        }
+                    },
+                    "required": ["content"]
                 }
             }
         })
@@ -596,13 +615,23 @@ class BacktestAgent:
             elif tool_name == "FINISH_SIGNAL" or tool_name == "finish_signal":
                 return {"content": [{"type": "text", "text": "<FINISH_SIGNAL>"}], "is_finish": True}
             
+            # Strategy Context tool
+            elif tool_name == "update_strategy_context":
+                content = args.get("content", "")
+                try:
+                    with open(self.strategy_context_path, 'w') as f:
+                        f.write(content)
+                    return {"content": [{"type": "text", "text": "Strategy context updated successfully."}]}
+                except Exception as e:
+                    return {"content": [{"type": "text", "text": f"Error updating strategy context: {str(e)}"}]}
+
             else:
                 return {"content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}]}
         
         except Exception as e:
             return {"content": [{"type": "text", "text": f"Error calling {tool_name}: {str(e)}"}]}
     
-    def get_system_prompt(self, today_date: str, max_steps: int) -> str:
+    def get_system_prompt(self, today_date: str, max_steps: int, strategy_context: str = "") -> str:
         """Generate system prompt with step count awareness."""
         return f"""You are a stock fundamental analysis trading assistant.
 
@@ -611,6 +640,12 @@ Your goals are:
 - You need to think about the prices of various stocks and their returns.
 - Your long-term goal is to maximize returns through this portfolio.
 - Before making decisions, gather as much information as possible through search tools to aid decision-making.
+
+LONG-TERM STRATEGY CONTEXT:
+The following is your persistent note from previous trading days. Use it to maintain continuity in your strategy.
+'''
+{strategy_context}
+'''
 
 STEP BUDGET: You have a MAXIMUM of {max_steps} steps to complete your analysis and trading today.
 You MUST be efficient and prioritize the most important actions.
@@ -634,7 +669,8 @@ STEP 5: Make a trading decision:
    - If prices have moved: consider SELLING or REBALANCING (include price parameter!)
    - If no clear opportunity: explicitly state you're HOLDING
 STEP 6: Execute any trades using buy_stock or sell_stock WITH THE PRICE PARAMETER
-STEP 7: ONLY after completing steps 1-6, output {self.STOP_SIGNAL}
+STEP 7: Update your long-term strategy note using update_strategy_context. This is CRITICAL for maintaining your strategy across days.
+STEP 8: ONLY after completing steps 1-7, output {self.STOP_SIGNAL}
 
 IMPORTANT RULES:
 - Even if market news is empty, you MUST still analyze trading opportunities with the provided prices
@@ -689,6 +725,12 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
         max_steps = self.trading_config.get("max_steps_per_day")
         # need proper error catching for this
         
+        # Read strategy context
+        strategy_context = "No prior strategy context. This is the first day."
+        if self.strategy_context_path.exists():
+            with open(self.strategy_context_path, 'r') as f:
+                strategy_context = f.read()
+        
         # Pre-fetch prices for all symbols
         symbols = self.trading_config.get("symbols", [])
         pricing_results = pricing.get_prices_batch(symbols)
@@ -698,7 +740,7 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
             prices_str += f"- {symbol}: ${price:.2f}\n"
         
         messages = [
-            {"role": "system", "content": self.get_system_prompt(date, max_steps)},
+            {"role": "system", "content": self.get_system_prompt(date, max_steps, strategy_context)},
             {"role": "user", "content": f"Today is {date}. You have {max_steps} steps maximum.\n\n{prices_str}\n\nAnalyze these prices and make trading decisions efficiently."}
         ]
         step_count = 0
@@ -805,6 +847,7 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
             "date": date,
             "steps": step_count,
             "api_calls": api_calls,
+            "strategy_context": strategy_context,
             "logs": logs,
             "portfolio": self.portfolio.get_state_string(),
             "equity": self.portfolio.get_total_equity(prices)
@@ -834,6 +877,12 @@ def run_backtest(csv_path: Path = None, output_dir: Path = None):
     print(f"\nLoading historical data from {csv_path}...")
     price_data = HistoricalPriceData(csv_path)
     
+    # Initialize strategy context file
+    strategy_context_path = output_dir / "strategy_context.txt"
+    with open(strategy_context_path, 'w') as f:
+        f.write("No prior strategy context. This is the first day.")
+    print(f"✓ Initialized strategy context at {strategy_context_path}")
+    
     # Get all Mondays
     mondays = price_data.get_mondays()
     print(f"\n✓ Found {len(mondays)} Mondays to backtest")
@@ -845,6 +894,8 @@ def run_backtest(csv_path: Path = None, output_dir: Path = None):
     portfolio = BacktestPortfolio(initial_capital)
     
     # Create backtest agent
+    # Update config with output_dir for agent to use
+    config.trading_config["output_dir"] = output_dir
     agent = BacktestAgent(config, price_data, portfolio)
     
     # Run backtest for each Monday
