@@ -13,7 +13,7 @@ def get_market_insights(ticker: Optional[str] = None, limit: int = 5) -> Dict[st
     """Fetch market news from Massive API.
     
     Args:
-        ticker: Optional ticker symbol to filter news
+        ticker: Optional single ticker symbol to filter news (e.g. 'AAPL'). Do NOT pass a list.
         limit: Number of results to return (default 5)
         
     Returns:

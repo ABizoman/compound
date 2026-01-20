@@ -342,24 +342,24 @@ class BacktestAgent:
         # News/Search tools
         tools.append({
             "type": "function",
-            "function": {
-                "name": "get_market_insights",
-                "description": "Get market news and insights for a specific stock ticker or general market news",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "symbol": {
-                            "type": "string",
-                            "description": "Stock ticker symbol to get news for"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Number of news items to return (default 5)",
-                            "default": 5
+                "function": {
+                    "name": "get_market_insights",
+                    "description": "Get market news and insights.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {
+                                "type": "string",
+                                "description": "Single stock ticker symbol to get news for (e.g. 'AAPL'). Leave empty for general market news. Do NOT pass a list."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Number of news items to return (default 5)",
+                                "default": 5
+                            }
                         }
                     }
                 }
-            }
         })
         
         # Add Stock tools
@@ -625,8 +625,8 @@ CRITICAL TRADING RULES:
 
 CRITICAL: You MUST complete ALL of the following steps before finishing. DO NOT skip any steps:
 
-STEP 1: Gather market insights using get_market_insights. You can specify a ticker symbol to get news for that specific stock or list of tickers
-STEP 2: Get current prices using get_prices_batch for ALL symbols (REQUIRED before any trades)
+STEP 1: Gather market insights using get_market_insights. You can specify a SINGLE ticker symbol to get news for that specific stock, or leave it empty for general market news. If you need news for multiple stocks, you must call this tool multiple times (once per ticker) or just get general news.
+STEP 2: Analyze the PROVIDED prices for all symbols (prices are already given in the prompt)
 STEP 3: Analyze your current portfolio using get_portfolio
 STEP 4: Calculate valuations and potential returns using batch_calculate to save steps (e.g., batch_calculate with all position values at once)
 STEP 5: Make a trading decision:
@@ -637,8 +637,8 @@ STEP 6: Execute any trades using buy_stock or sell_stock WITH THE PRICE PARAMETE
 STEP 7: ONLY after completing steps 1-6, output {self.STOP_SIGNAL}
 
 IMPORTANT RULES:
-- Even if market news is empty, you MUST still get prices and analyze trading opportunities
-- Getting prices is MANDATORY - you cannot finish without checking prices
+- Even if market news is empty, you MUST still analyze trading opportunities with the provided prices
+- You must make a conscious trading decision (buy/sell/hold) based on price analysis
 - You must make a conscious trading decision (buy/sell/hold) based on price analysis
 - DO NOT output {self.STOP_SIGNAL} until you have checked prices and made trading decisions
 - Simply gathering news is NOT enough - you must analyze prices and execute trades or explicitly decide to hold
@@ -689,9 +689,17 @@ REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
         max_steps = self.trading_config.get("max_steps_per_day")
         # need proper error catching for this
         
+        # Pre-fetch prices for all symbols
+        symbols = self.trading_config.get("symbols", [])
+        pricing_results = pricing.get_prices_batch(symbols)
+        
+        prices_str = "Current Stock Prices:\n"
+        for symbol, price in pricing_results.items():
+            prices_str += f"- {symbol}: ${price:.2f}\n"
+        
         messages = [
             {"role": "system", "content": self.get_system_prompt(date, max_steps)},
-            {"role": "user", "content": f"Today is {date}. You have {max_steps} steps maximum. Analyze prices and make trading decisions efficiently."}
+            {"role": "user", "content": f"Today is {date}. You have {max_steps} steps maximum.\n\n{prices_str}\n\nAnalyze these prices and make trading decisions efficiently."}
         ]
         step_count = 0
         logs = []
