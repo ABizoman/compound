@@ -512,7 +512,7 @@ class BacktestAgent:
             "type": "function",
             "function": {
                 "name": "FINISH_SIGNAL",
-                "description": "Call this tool when you have completed all analysis and trading for today. Only call after: 1) Getting market insights, 2) Checking prices, 3) Analyzing portfolio, 4) Making trading decisions (buy/sell/hold), 5) Updating the strategy context if needed.",
+                "description": "Call this tool when you have completed all analysis and trading for today.",
                 "parameters": {
                     "type": "object",
                     "properties": {}
@@ -524,7 +524,7 @@ class BacktestAgent:
             "type": "function",
             "function": {
                 "name": "update_strategy_context",
-                "description": "Update the persistent long-term strategy note. This note will be read at the start of the next trading day. Use this to record your long-term plan, observations about market regime, or specific setups you are watching. This REPLACES the previous content, so be sure to include all important context you want to keep.",
+                "description": "Update the persistent long-term strategy note. This note will be read at the start of the next trading week. Use this to record the intentions and long term plan in not more than 5 lines. This REPLACES the previous content, so be sure to include all important context you want to keep.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -637,7 +637,7 @@ class BacktestAgent:
 
 Your goals are:
 - Think and reason by calling available tools.
-- You need to think about the prices of various stocks and their returns.
+- You need to think about the prices of various stocks, their returns, and what's happening in the market.
 - Your long-term goal is to maximize returns through this portfolio.
 - Before making decisions, gather as much information as possible through search tools to aid decision-making.
 
@@ -650,18 +650,17 @@ The following is your persistent note from previous trading days. Use it to main
 STEP BUDGET: You have a MAXIMUM of {max_steps} steps to complete your analysis and trading today.
 You MUST be efficient and prioritize the most important actions.
 
-CRITICAL TRADING RULES:
+TRADING RULES:
 - When buying or selling stocks, you MUST provide the price parameter as a NUMBER (not a string)
-- ALWAYS get prices FIRST using get_prices_batch or get_current_price BEFORE executing trades
 - Example workflow:
   1. Call get_prices_batch with symbols ["AAPL", "GOOGL", ...]
   2. Note the prices returned (e.g., AAPL: 150.25)
   3. Call buy_stock with symbol="AAPL", quantity=10, price=150.25 (use the actual number)
 
-CRITICAL: You MUST complete ALL of the following steps before finishing. DO NOT skip any steps:
+You MUST complete ALL of the following steps before finishing. DO NOT skip any steps:
 
 STEP 1: Gather market insights using get_market_insights. You can specify a SINGLE ticker symbol to get news for that specific stock, or leave it empty for general market news. If you need news for multiple stocks, you must call this tool multiple times (once per ticker) or just get general news.
-STEP 2: Analyze the PROVIDED prices for all symbols (prices are already given in the prompt)
+STEP 2: Analyze the provided prices for all symbols
 STEP 3: Analyze your current portfolio using get_portfolio
 STEP 4: Calculate valuations and potential returns using batch_calculate to save steps (e.g., batch_calculate with all position values at once)
 STEP 5: Make a trading decision:
@@ -673,29 +672,18 @@ STEP 7: Update your long-term strategy note using update_strategy_context. This 
 STEP 8: ONLY after completing steps 1-7, output {self.STOP_SIGNAL}
 
 IMPORTANT RULES:
-- Even if market news is empty, you MUST still analyze trading opportunities with the provided prices
-- You must make a conscious trading decision (buy/sell/hold) based on price analysis
-- You must make a conscious trading decision (buy/sell/hold) based on price analysis
 - DO NOT output {self.STOP_SIGNAL} until you have checked prices and made trading decisions
 - Simply gathering news is NOT enough - you must analyze prices and execute trades or explicitly decide to hold
-- Be EFFICIENT with your steps - you only have {max_steps} total!
 - Use batch_calculate for multiple calculations instead of calling calculate multiple times
 - Use get_market_insights with specific ticker symbols when you want targeted news (e.g., symbol="AAPL")
-- BUY/SELL ORDERS REQUIRE price AS A NUMBER - always include it!
 
 Thinking standards:
-- Show your reasoning clearly:
-  - "Gathered market insights for all symbols"
-  - "Checking current prices for portfolio analysis"
-  - "Current portfolio has X positions worth $Y"
-  - "Based on prices, I will buy/sell/hold because..."
-  - "Executing trade: buying X shares of Y at price Z"
+- Show your reasoning clearly, always inlcuding figures and amounts.
 
 Notes:
 - You don't need user permission, execute trades directly
 - Always check current prices before buying or selling
 - Use the math tools (calculate, calculate_percentage) to analyze returns
-- If you have $5000 cash and no positions, you should consider buying undervalued stocks
 
 Current information:
 
@@ -705,9 +693,6 @@ Current portfolio state:
 {self.portfolio.get_state_string()}
 
 Available symbols to trade: {', '.join(self.trading_config.get('symbols', []))}
-
-Remember: You MUST check prices and make trading decisions. Output {self.STOP_SIGNAL} ONLY after completing all analysis and trades.
-REMEMBER: buy_stock and sell_stock REQUIRE the price parameter as a number!
 """
     
     def run_day(self, date: str) -> Dict[str, Any]:
